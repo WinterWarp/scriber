@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Scriber
+Comment=Handwrite with a stylus to input text
+Exec=scriber
+Icon=input-tablet
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=handwriting;stylus;pen;input;recognition;
+StartupNotify=true

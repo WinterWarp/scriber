@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scriber"
+version = "0.1.0"
+description = "Handwrite with a stylus to input text into GNOME apps"
+requires-python = ">=3.11"
+# PyGObject / pycairo are provided by Nix (flake), not pip.
+
+[project.scripts]
+scriber = "scriber.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["scriber*"]
