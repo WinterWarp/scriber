@@ -30,6 +30,10 @@ DEFAULTS = {
     "guide_lines": True,
     "stroke_width": 3.0,
     "append": False,                  # accumulate successive recognitions
+    # compact mode: a small, stripped-down window for writing alongside your
+    # target app (handy with auto-type). always_on_top is best-effort (see app.py).
+    "compact": False,
+    "always_on_top": True,
 }
 
 
