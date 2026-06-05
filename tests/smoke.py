@@ -104,9 +104,46 @@ def test_model_field_ui():
     print("ok  model field shows/edits/rebinds per engine")
 
 
+def test_compact_mode():
+    win = _make_window()
+    # Starts in the full layout: toolbar + text box visible.
+    assert win.compact_toggle.get_active() is False
+    assert win.toolbar.get_visible() is True
+    assert win.text_frame.get_visible() is True
+
+    # Toggle the header button -> compact: extras hide, button reflects state.
+    win.compact_toggle.set_active(True)
+    assert win.conf["compact"] is True
+    assert win.toolbar.get_visible() is False
+    assert win.text_frame.get_visible() is False
+    assert win.clear_text_btn.get_visible() is False
+
+    # Back to full layout.
+    win.compact_toggle.set_active(False)
+    assert win.conf["compact"] is False
+    assert win.toolbar.get_visible() is True
+    assert win.text_frame.get_visible() is True
+    print("ok  compact mode hides/shows the extra UI")
+
+
+def test_compact_startup():
+    from scriber import config as cfg
+    from scriber.app import ScriberWindow
+
+    conf = dict(cfg.DEFAULTS, compact=True)
+    app = Gtk.Application(application_id="org.scriber.SmokeTestCompact")
+    app.register(None)
+    win = ScriberWindow(app, conf)
+    # A window built from a compact default opens already collapsed.
+    assert win.compact_toggle.get_active() is True
+    assert win.toolbar.get_visible() is False
+    print("ok  compact default opens collapsed")
+
+
 if __name__ == "__main__":
     failures = 0
-    for test in (test_export_png, test_tesseract_pipeline, test_window_builds, test_model_field_ui):
+    for test in (test_export_png, test_tesseract_pipeline, test_window_builds,
+                 test_model_field_ui, test_compact_mode, test_compact_startup):
         try:
             test()
         except Exception as exc:  # noqa: BLE001

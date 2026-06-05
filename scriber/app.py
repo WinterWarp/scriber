@@ -14,6 +14,9 @@ from .recognizers import make_recognizer  # noqa: E402
 
 APP_ID = "org.scriber.Scriber"
 
+NORMAL_SIZE = (760, 480)
+COMPACT_SIZE = (420, 250)
+
 
 class ScriberWindow(Gtk.ApplicationWindow):
     def __init__(self, app, conf):
@@ -21,9 +24,19 @@ class ScriberWindow(Gtk.ApplicationWindow):
         self.app = app
         self.conf = conf
         self._auto_timer = None
+        self._on_top = False
+        self._sync_compact = False  # guards programmatic compact_toggle updates
         self.set_default_size(760, 480)
         self._build_ui()
         self._install_shortcuts()
+        # Open straight into compact mode if that was the saved default. The
+        # window isn't mapped yet, so size via set_default_size and skip the
+        # runtime resize dance.
+        if bool(self.conf.get("compact", False)):
+            self.set_default_size(*COMPACT_SIZE)
+            self._apply_compact(True, resize=False, apply_on_top=False)
+            # The window has no surface yet; pin it once it's mapped.
+            self.connect("map", self._on_map_pin)
 
     # ---- UI construction ------------------------------------------------
     def _build_ui(self):
@@ -40,13 +53,19 @@ class ScriberWindow(Gtk.ApplicationWindow):
         menu_btn.set_popover(self._build_settings_popover())
         header.pack_end(menu_btn)
 
+        self.compact_toggle = Gtk.ToggleButton(icon_name="view-restore-symbolic")
+        self.compact_toggle.set_tooltip_text("Compact mode — small window for writing alongside your app (Ctrl+M)")
+        self.compact_toggle.connect("toggled", self._on_compact_toggled)
+        header.pack_end(self.compact_toggle)
+
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         for setter in ("set_margin_top", "set_margin_bottom", "set_margin_start", "set_margin_end"):
             getattr(root, setter)(8)
         self.set_child(root)
+        self._root = root
 
         # toolbar
-        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.toolbar = toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         clear_btn = Gtk.Button(label="Clear")
         clear_btn.connect("clicked", lambda _b: self.canvas.clear())
         undo_btn = Gtk.Button(label="Undo stroke")
@@ -81,7 +100,7 @@ class ScriberWindow(Gtk.ApplicationWindow):
         scroller.set_min_content_height(72)
         scroller.set_max_content_height(140)
         scroller.set_child(textview)
-        text_frame = Gtk.Frame()
+        self.text_frame = text_frame = Gtk.Frame()
         text_frame.set_child(scroller)
         root.append(text_frame)
 
@@ -92,7 +111,7 @@ class ScriberWindow(Gtk.ApplicationWindow):
         self.status.set_hexpand(True)
         self.status.set_ellipsize(3)  # Pango.EllipsizeMode.END
         self.status.add_css_class("dim-label")
-        clear_text_btn = Gtk.Button(label="Clear text")
+        self.clear_text_btn = clear_text_btn = Gtk.Button(label="Clear text")
         clear_text_btn.connect("clicked", lambda _b: self.buffer.set_text("", -1))
         type_btn = Gtk.Button(label="Auto-type")
         type_btn.connect("clicked", lambda _b: self.do_autotype())
@@ -146,6 +165,10 @@ class ScriberWindow(Gtk.ApplicationWindow):
         space_chk.set_active(bool(self.conf.get("append_space", True)))
         space_chk.connect("toggled", lambda c: self.conf.__setitem__("append_space", c.get_active()))
 
+        ontop_chk = Gtk.CheckButton(label="Keep on top in compact mode")
+        ontop_chk.set_active(bool(self.conf.get("always_on_top", True)))
+        ontop_chk.connect("toggled", self._on_ontop_toggled)
+
         save_btn = Gtk.Button(label="Save as defaults")
         save_btn.connect("clicked", self._on_save_defaults)
 
@@ -154,6 +177,7 @@ class ScriberWindow(Gtk.ApplicationWindow):
         box.append(labelled("Send text via", self.input_dd))
         box.append(guide_chk)
         box.append(space_chk)
+        box.append(ontop_chk)
         box.append(Gtk.Separator())
         box.append(save_btn)
         popover.set_child(box)
@@ -171,6 +195,7 @@ class ScriberWindow(Gtk.ApplicationWindow):
         add("clear", lambda: self.canvas.clear(), ["<Control>l"])
         add("undo", lambda: self.canvas.undo(), ["<Control>z"])
         add("copy", self.do_copy, ["<Control><Shift>c"])
+        add("compact", lambda: self.compact_toggle.set_active(not self.compact_toggle.get_active()), ["<Control>m"])
 
     # ---- settings handlers ---------------------------------------------
     def _on_engine_changed(self, dropdown, _param):
@@ -212,6 +237,95 @@ class ScriberWindow(Gtk.ApplicationWindow):
         self.conf["guide_lines"] = check.get_active()
         self.canvas.guide_lines = check.get_active()
         self.canvas.queue_draw()
+
+    def _on_ontop_toggled(self, check):
+        self.conf["always_on_top"] = check.get_active()
+        # Re-apply if we're already compact so the change takes effect now.
+        if self.conf.get("compact"):
+            self._apply_always_on_top(True)
+
+    # ---- compact / always-on-top ---------------------------------------
+    def _on_compact_toggled(self, button):
+        if self._sync_compact:
+            return  # programmatic sync from _apply_compact, not a user click
+        self._apply_compact(button.get_active())
+
+    def _on_map_pin(self, *_a):
+        self._apply_always_on_top(self.conf.get("compact", False))
+        return False
+
+    def _apply_compact(self, on, *, resize=True, apply_on_top=True):
+        """Switch between the full window and a small, stripped-down one.
+
+        Compact mode hides the toolbar and the recognized-text box, leaving the
+        canvas plus Recognize / Auto-type / Copy — a palette you can keep beside
+        your target app and feed with auto-type.
+        """
+        on = bool(on)
+        self.conf["compact"] = on
+        self.toolbar.set_visible(not on)
+        self.text_frame.set_visible(not on)
+        self.clear_text_btn.set_visible(not on)
+        # A shorter canvas keeps the compact window small but still writable.
+        self.canvas.set_content_height(120 if on else 260)
+        if self.compact_toggle.get_active() != on:  # keep button + shortcut in sync
+            self._sync_compact = True  # don't let set_active re-enter via "toggled"
+            self.compact_toggle.set_active(on)
+            self._sync_compact = False
+        if resize:
+            self._resize_to(*(COMPACT_SIZE if on else NORMAL_SIZE))
+        if apply_on_top:
+            self._apply_always_on_top(on)
+
+    def _resize_to(self, width, height):
+        """Force a mapped window to a new size.
+
+        GTK4 dropped Gtk.Window.resize(); set_default_size alone won't shrink an
+        already-shown window. Briefly making the window non-resizable snaps it to
+        its natural size, which we pin to the target via the root's size request.
+        """
+        self.set_default_size(width, height)
+        self._root.set_size_request(width, height)
+        self.set_resizable(False)
+
+        def release():
+            self.set_resizable(True)
+            self._root.set_size_request(-1, -1)
+            return False
+
+        GLib.idle_add(release)
+
+    def _apply_always_on_top(self, compact_on):
+        """Best-effort keep-above for compact mode.
+
+        GTK4 exposes no portable "keep above", so we shell out to wmctrl when
+        present (works on X11 sessions). On Wayland/GNOME, where only the
+        compositor can pin a window, we fall back to a one-time hint pointing at
+        the title-bar's "Always on Top" item.
+        """
+        import shutil
+        import subprocess
+
+        want = bool(compact_on) and bool(self.conf.get("always_on_top", True))
+        if want == self._on_top:
+            return False
+        self._on_top = want
+
+        if shutil.which("wmctrl"):
+            action = "add" if want else "remove"
+            try:
+                subprocess.run(
+                    ["wmctrl", "-r", self.get_title() or "Scriber", "-b", f"{action},above"],
+                    check=False,
+                    capture_output=True,
+                )
+                return False
+            except Exception:  # noqa: BLE001 — fall through to the manual hint
+                pass
+
+        if want:
+            self._set_status("Compact mode — to pin it, right-click the title bar → Always on Top")
+        return False
 
     def _on_save_defaults(self, _btn):
         cfg.save(self.conf)

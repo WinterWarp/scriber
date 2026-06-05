@@ -57,6 +57,7 @@ Toolbar:
 | **Auto** | Recognize automatically a moment after you stop writing |
 | **Append** | Add each recognition to the existing text (write sentences word-by-word) |
 | **Copy** (`Ctrl+Shift+C`) / **Auto-type** | Send the text to the clipboard / type it |
+| **Compact mode** (`Ctrl+M`, or the ⤢ header button) | Shrink to a small, always-on-top palette for writing beside your app |
 
 ## Recognition engines
 
@@ -133,6 +134,26 @@ Two ways to use it:
 
   Workflow: write in Scriber → focus your target app → press the shortcut.
 
+## Compact mode (small, always-on-top)
+
+For quick word-by-word input — especially with **auto-type** — toggle **Compact
+mode** with the ⤢ button in the header or `Ctrl+M`. The window shrinks to a small
+palette (just the canvas plus Recognize / Auto-type / Copy), hiding the toolbar
+and the recognized-text box, so it fits beside your target app. Press `Ctrl+M`
+again to return to the full window. Set `compact = true` in the config to have
+Scriber open this way every time.
+
+**Staying on top** is best-effort, because GTK4 has no portable "keep above":
+
+- On **X11** sessions, Scriber uses `wmctrl` (if installed) to pin the window
+  while compact, and unpins it when you leave compact mode.
+- On **Wayland / GNOME**, only the compositor can pin a window. Right-click the
+  title bar and choose **Always on Top** (Scriber shows a one-time reminder).
+  The window stays small either way, which is the part that matters for
+  auto-type.
+
+Turn the keep-above behaviour off with **≡ menu → Keep on top in compact mode**.
+
 ## Configuration
 
 `~/.config/scriber/config.toml` (flat keys). The **≡ menu → Save as defaults**
@@ -152,6 +173,8 @@ autotype_delay = 1.2          # countdown seconds before auto-typing
 guide_lines = true
 stroke_width = 3.0
 append = false                # accumulate successive recognitions
+compact = false               # open as a small palette (toolbar/text box hidden)
+always_on_top = true          # keep compact window above others (best-effort; see below)
 ```
 
 ## Limitations & notes
